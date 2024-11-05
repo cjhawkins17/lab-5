@@ -57,77 +57,111 @@ Detective Wickham reaches out to you...
 
 > A crime has taken place and I need your help! There was a murder in SQL City sometime on January 15, 2018. Could you retrieve the crime scene report from the police department’s database and follow the clues to find the person responsible for the murder?!
 
+*I made a revision to this code. I added the mutate line. I realized that I could parse the date column into a date variable to make it easier to read. I also added to the filter an element tbhsat the type is murder to further filter the data. This is important because I don't want readers to get confused when reading data.*
 ```{r}
 #| label: inspecting-crime-scene-report
 
 # filter all the reports that are in SQL City and on 2018-01-15
 crime_scene_report |>
+  mutate(date = ymd(date)) |>
   filter(city == "SQL City",
-         date == "20180115")
+         date == ymd("20180115"),
+         type == "murder")
 
 ```
 
+*Revision, I added section headers to make the code easier to read and more tidy.*
+
+### Check the person dataset based on the clue to get the witnesses
+
 Clue 2: The first witness lives at the last house on "Northwestern Dr". The second witness, named Annabel, lives somewhere on "Franklin Ave".
 
+*revision. I changed how a filtetred the data to look at both suspects in the same pipeline. I also used slice_max to look at the top results. This makes my code more efficent since I can do everthing in one pipeline.*
 ```{r}
 #| label: street-names
 
 # filter the person dataset for street name address is either Northwestern Dr or Franklin Ave
-person |>
-  filter(address_street_name == "Northwestern Dr") |>
-  arrange(desc(address_number)) |>
-  slice(1)
+witnesses <- person |>
+  filter(
+    address_street_name %in% c("Northwestern Dr", "Franklin Ave") & 
+    (address_street_name == "Northwestern Dr" | str_detect(name, "^Annabel\\b"))
+  ) |>
+  group_by(address_street_name) |>
+  slice_max(address_number, n = 1) |>
+  ungroup()
 
-person |>
-  filter(address_street_name == "Franklin Ave",
-         str_detect(name, "^Annabel\\b"))
 ```
+
+### Check the interviews of the witness interviews
 
 Clue 3: Witness is  Morty Schapiro (14887) and Annabel Miller (16371)
 
+*revision, I condensed both interview into one pipeline and joined the two ids together so they dont have to be hard coded. This makes my code more efficient since there is only one pipeline and the ids are not hard coded.*
 ```{r}
 #| label: interviews
 
 # look though the interviews
-interview |>
-  inner_join(person, join_by("person_id" == "id")) |>
-  filter(person_id %in% c(14887, 16371))
+witness_interviews <- witnesses |>
+  inner_join(interview, by = c("id" = "person_id"))
 ```
+
+### Identify the suspect
 
 Clue 4: The membership number on the bag started with "48Z". Only gold members have those bags. The man got into a car with a plate that included "H42W"... when I was working out last week on January the 9th.
 
+*Revision, I combined the subsequent functions into one pipeline per feedback. This makes the code more efficient and easier to follow instead of have separate code chucks to do so.*
 ```{r}
 #| label: gym-id
 
-get_fit_now_member |>
-  filter(str_detect(id, "^48Z"),
-         membership_status == "gold")
+suspect <- get_fit_now_member |>
+  filter(str_detect(id, "^48Z"), membership_status == "gold") |>
+  mutate(id = as.character(id)) |>
+  inner_join(get_fit_now_check_in, by = c("id" = "membership_id")) |>
+  filter(check_in_date == "20180109") |>
+  inner_join(person, by = c("person_id" = "id")) |>
+  inner_join(drivers_license, by = c("license_id" = "id")) |>
+  filter(str_detect(plate_number, "H42W"))
+
+print(suspect)
+
+#get_fit_now_member |>
+#  filter(str_detect(id, "^48Z"),
+#         membership_status == "gold")
 ```
+
+### Interview the suspect
 
 either Joe Germuska (28819) or Jeremy Bowers (67318)
 
 ```{r}
 #| label: license-plate
 
-drivers_license |>
-  inner_join(person, join_by("id" == "license_id")) |>
-  filter(str_detect(plate_number, "H42W"))
+#drivers_license |>
+#  inner_join(person, join_by("id" == "license_id")) |>
+#  filter(str_detect(plate_number, "H42W"))
 ```
 
 Jeremy Bowers (424427) is on both license plate and gym search.
 
+### Check the gym checkin timing
+
+*Revision, made a join to combine the interview dataset so I don't need to hard code the name. This makes the code more efficient and reproducible since the code is no longer hard coded.*
 ```{r}
 #| label: gym-timing
 
 # Annabel saw the murder, check if Jeremy was at the gym same time
-get_fit_now_check_in |>
-  filter(check_in_date == "20180109",
-         membership_id == "48Z55")
+#get_fit_now_check_in |>
+#  filter(check_in_date == "20180109",
+#         membership_id == "48Z55")
 
 # Yes Jeremy was at gym same time, look into his interview
-interview |>
+interview_suspect <- suspect |>
+  inner_join(interview, by = c("person_id")) |>
   filter(person_id == "67318")
+print(interview_suspect)
 ```
+
+### Look at the final suspect
 
 Clue 5: I was hired by a woman with a lot of money. I don't know her name but I know she's around 5'5" (65") or 5'7" (67"). She has red hair and she drives a Tesla Model S. I know that she attended the SQL Symphony Concert 3 times in December 2017.
 
